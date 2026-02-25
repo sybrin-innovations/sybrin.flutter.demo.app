@@ -1,0 +1,55 @@
+name: bioid_flutter
+description: "Flutter demo app showcasing Sybrin BioID SDKs: Identity scanning, Liveness Detection & Face Comparison."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  provider: ^6.1.2
+
+  # Typography - Google Fonts (Inter)
+  google_fonts: ^6.2.1
+
+  # Smooth UI animations
+  flutter_animate: ^4.5.0
+
+  # Settings persistence across app restarts
+  shared_preferences: ^2.3.3
+
+  # Camera / gallery image picking (Face Comparison)
+  image_picker: ^1.1.2
+
+  # App icons and visual niceties
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+
+# ── Launcher icon configuration ──────────────────────────────────────────────
+# flutter pub run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: false
+  # Adaptive icon (API 26+): white vertical logo foreground, Sybrin dark background.
+  # The adaptive icon framework provides a safe zone that acts as natural padding
+  # so the logo is never cropped or distorted.
+  adaptive_icon_background: "#1E1E28"
+  adaptive_icon_foreground: "assets/images/app_icon.png"
+  # Fallback flat icon for older Android (pre API-26)
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
