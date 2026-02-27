@@ -2,39 +2,28 @@ package com.demo.bioid_flutter
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
-import java.io.ByteArrayOutputStream
 import com.sybrin.facecomparison.SybrinFacialComparison
 import com.sybrin.facecomparison.SybrinFacialComparisonConfiguration
 import com.sybrin.identity.SybrinIdentity
 import com.sybrin.identity.SybrinIdentityConfiguration
-import com.sybrin.identity.data.model.southafrica.SouthAfricaGreenBookModel
-import com.sybrin.identity.data.model.southafrica.SouthAfricaIDCardModel
-import com.sybrin.identity.data.model.southafrica.SouthAfricaPassportModel
-import com.sybrin.identity.enums.Country
+import com.sybrin.identity.enums.Document
+import com.sybrin.identity.models.DocumentModel
 import com.sybrin.livenessdetection.SybrinLivenessDetection
 import com.sybrin.livenessdetection.SybrinLivenessDetectionConfiguration
 import com.sybrin.livenessdetection.SybrinLivenessVersion
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-/**
- * Flutter MethodChannel bridge for the BioID demo app.
- *
- * Only the properties confirmed in the original BioID Android app are accessed:
- *   - GreenBook  → model.documentImage
- *   - Passport   → model.portraitImage
- *   - IDCard     → model.documentImage
- *   - Liveness   → result.selfieImage
- *   - FaceCompare→ result.averageConfidence
- *
- * No other model fields (surname, names, etc.) are accessed – the original app
- * only logs the full model object and does not individually read those fields.
- */
 class MainActivity : FlutterActivity() {
 
     companion object {
         private const val CHANNEL = "com.demo.bioid/sybrin"
+        private val DATE_FMT = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     }
 
     private lateinit var sybrinIdentity: SybrinIdentity
@@ -44,163 +33,167 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // ── SDK configuration (mirrors BioID/app/src/main/java/com/demo/bioid/MainActivity.kt) ──
+        sybrinIdentity =
+                SybrinIdentity.getInstance(
+                        this,
+                        SybrinIdentityConfiguration.Builder()
+                                .enableMultiPhaseVerification(false)
+                                .enableImageQualityAssessment(false)
+                                .enableAutoCropping(false)
+                                .setEnvironmentKey(SDKConfig.IDENTITY_KEY)
+                                .build()
+                )
 
-        val identityConfig = SybrinIdentityConfiguration
-            .Builder()
-            .enableMultiPhaseVerification(false)
-            .enableImageQualityAssessment(false)
-            .enableAutoCropping(false)
-            .setEnvironmentKey(SDKConfig.IDENTITY_KEY)
-            .build()
+        livenessDetection =
+                SybrinLivenessDetection.getInstance(
+                        this,
+                        SybrinLivenessDetectionConfiguration.Builder()
+                                .setLivenessVersion(SybrinLivenessVersion.LIVENESS_V3)
+                                .setEnvironmentKey(SDKConfig.BIOMETRICS_KEY)
+                                .build()
+                )
 
-        val livenessConfig = SybrinLivenessDetectionConfiguration
-            .Builder()
-            .setLivenessVersion(SybrinLivenessVersion.LIVENESS_V3)
-            .setEnvironmentKey(SDKConfig.BIOMETRICS_KEY)
-            .build()
+        faceCompare =
+                SybrinFacialComparison.getInstance(
+                        this,
+                        SybrinFacialComparisonConfiguration.Builder()
+                                .setEnvironmentKey(SDKConfig.BIOMETRICS_KEY)
+                                .build()
+                )
 
-        val faceCompareConfig = SybrinFacialComparisonConfiguration
-            .Builder()
-            .setEnvironmentKey(SDKConfig.BIOMETRICS_KEY)
-            .build()
-
-        sybrinIdentity = SybrinIdentity.getInstance(this, identityConfig)
-        livenessDetection = SybrinLivenessDetection.getInstance(this, livenessConfig)
-        faceCompare = SybrinFacialComparison.getInstance(this, faceCompareConfig)
-
-        // ── Method channel ──────────────────────────────────────────────────────
-
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            CHANNEL
-        ).setMethodCallHandler { call, result ->
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler {
+                call,
+                result ->
             when (call.method) {
-                "scanGreenBook"  -> handleScanGreenBook(result)
-                "scanPassport"   -> handleScanPassport(result)
-                "scanIdCard"     -> handleScanIdCard(result)
-                "startLiveness"  -> handleLiveness(result)
-                "compareFaces"   -> {
-                    val targetBytes  = call.argument<ByteArray>("targetFace")
-                    val facesBytes   = call.argument<List<ByteArray>>("faces")
-                    handleCompareFaces(targetBytes, facesBytes, result)
+                "scanDocument" -> {
+                    val docName = call.argument<String>("document")
+                    val doc = docName?.let { runCatching { Document.valueOf(it) }.getOrNull() }
+                    if (doc == null) {
+                        result.error("INVALID_DOCUMENT", "Unknown document: $docName", null)
+                    } else {
+                        handleScanDocument(doc, result)
+                    }
                 }
+                "startLiveness" -> handleLiveness(result)
+                "compareFaces" ->
+                        handleCompareFaces(
+                                call.argument("targetFace"),
+                                call.argument("faces"),
+                                result
+                        )
                 else -> result.notImplemented()
             }
         }
     }
 
-    // ── Identity handlers ───────────────────────────────────────────────────────
+    // ── Universal document scanner ──────────────────────────────────────────────
 
-    private fun handleScanGreenBook(result: MethodChannel.Result) {
-        sybrinIdentity.scanGreenBook()
-            .addOnSuccessListener {
-                val model = it.castToModel(SouthAfricaGreenBookModel::class.java)
-                val data = mutableMapOf<String, Any?>()
-
-                // Only documentImage is confirmed in the original BioID app.
-                model.documentImage?.let { bmp -> data["portraitBytes"] = bitmapToBytes(bmp) }
-
-                result.success(data)
-            }
-            .addOnFailureListener { ex ->
-                result.error("GREEN_BOOK_FAILED", ex.message, null)
-            }
-            .addOnCancelListener {
-                result.error("SCAN_CANCELLED", "Green Book scan was cancelled.", null)
-            }
+    private fun handleScanDocument(doc: Document, result: MethodChannel.Result) {
+        sybrinIdentity
+                .scanDocument(doc)
+                .addOnSuccessListener { model -> result.success(buildResultMap(doc, model)) }
+                .addOnFailureListener { ex -> result.error("SCAN_FAILED", ex.message, null) }
+                .addOnCancelListener { result.error("SCAN_CANCELLED", "Scan was cancelled.", null) }
     }
 
-    private fun handleScanPassport(result: MethodChannel.Result) {
-        sybrinIdentity.scanPassport(Country.SouthAfrica)
-            .addOnSuccessListener {
-                val model = it.castToModel(SouthAfricaPassportModel::class.java)
-                val data = mutableMapOf<String, Any?>()
+    /** Extracts all readable fields from any concrete DocumentModel via reflection. */
+    private fun buildResultMap(doc: Document, model: DocumentModel): Map<String, Any?> {
+        val data = mutableMapOf<String, Any?>()
 
-                // portraitImage confirmed in BioID MainActivity.kt (line 94: targetFace = passport.portraitImage)
-                model.portraitImage?.let { bmp -> data["portraitBytes"] = bitmapToBytes(bmp) }
+        data["documentType"] = doc.name
+        data["country"] = doc.country.name
+        data["docCategory"] = doc.documentType.name
 
-                result.success(data)
-            }
-            .addOnFailureListener { ex ->
-                result.error("PASSPORT_FAILED", ex.message, null)
-            }
-            .addOnCancelListener {
-                result.error("SCAN_CANCELLED", "Passport scan was cancelled.", null)
-            }
+        model.portraitImage?.let { data["portraitBytes"] = bitmapToBytes(it) }
+        model.croppedDocumentImage?.let { data["croppedDocumentBytes"] = bitmapToBytes(it) }
+        model.documentImage?.let { data["documentImageBytes"] = bitmapToBytes(it) }
+
+        // Walk the concrete class's declared fields (the @JvmField data-class properties)
+        val skipTypes = setOf("Bitmap", "Rect", "DocumentCropOffsets")
+        val skipNames =
+                setOf(
+                        "portraitImage",
+                        "documentImage",
+                        "croppedDocumentImage",
+                        "documentBackImage",
+                        "portraitBackImage",
+                        "croppedDocumentBackImage"
+                )
+
+        for (field in model.javaClass.declaredFields) {
+            field.isAccessible = true
+            val name = field.name
+            if (name.startsWith("$") || skipNames.contains(name)) continue
+            if (skipTypes.contains(field.type.simpleName)) continue
+
+            val value = field.get(model) ?: continue
+            val label = camelToLabel(name)
+            data[label] =
+                    when (value) {
+                        is java.util.Date -> DATE_FMT.format(value)
+                        is Enum<*> -> value.name
+                        else -> value.toString()
+                    }
+        }
+
+        return data.filterValues { it != null && it.toString().isNotBlank() }
     }
 
-    private fun handleScanIdCard(result: MethodChannel.Result) {
-        sybrinIdentity.scanIDCard(Country.SouthAfrica)
-            .addOnSuccessListener {
-                val model = it.castToModel(SouthAfricaIDCardModel::class.java)
-                val data = mutableMapOf<String, Any?>()
-
-                // documentImage confirmed in BioID MainActivity.kt (line 108: targetFace = id.documentImage)
-                model.documentImage?.let { bmp -> data["portraitBytes"] = bitmapToBytes(bmp) }
-
-                result.success(data)
+    /** "dateOfBirth" → "Date Of Birth" */
+    private fun camelToLabel(s: String): String =
+            s.replaceFirstChar { it.uppercase() }.replace(Regex("([a-z])([A-Z])")) {
+                "${it.groupValues[1]} ${it.groupValues[2]}"
             }
-            .addOnFailureListener { ex ->
-                result.error("ID_CARD_FAILED", ex.message, null)
-            }
-            .addOnCancelListener {
-                result.error("SCAN_CANCELLED", "ID Card scan was cancelled.", null)
-            }
-    }
 
-    // ── Biometrics handlers ─────────────────────────────────────────────────────
+    // ── Biometrics ──────────────────────────────────────────────────────────────
 
     private fun handleLiveness(result: MethodChannel.Result) {
-        livenessDetection.openPassiveLivenessDetection()
-            .addOnSuccessListener {
-                val data = mutableMapOf<String, Any?>()
-                // selfieImage confirmed in BioID MainActivity.kt (line 121-122)
-                it.selfieImage?.let { bmp -> data["portraitBytes"] = bitmapToBytes(bmp) }
-                // Liveness SDK does not expose a confidence score in the original app;
-                // default to 1.0 to indicate the check passed.
-                data["confidence"] = 1.0
-                result.success(data)
-            }
-            .addOnFailureListener { ex ->
-                result.error("LIVENESS_FAILED", ex.message, null)
-            }
-            .addOnCancelListener {
-                result.error("SCAN_CANCELLED", "Liveness detection was cancelled.", null)
-            }
+        livenessDetection
+                .openPassiveLivenessDetection()
+                .addOnSuccessListener {
+                    val data = mutableMapOf<String, Any?>()
+                    it.selfieImage?.let { bmp -> data["portraitBytes"] = bitmapToBytes(bmp) }
+                    data["confidence"] = it.livenessConfidence.toDouble()
+                    data["isAlive"] = it.isAlive
+                    data["hasFaceMask"] = it.hasFaceMask()
+                    result.success(data)
+                }
+                .addOnFailureListener { ex -> result.error("LIVENESS_FAILED", ex.message, null) }
+                .addOnCancelListener {
+                    result.error("SCAN_CANCELLED", "Liveness detection was cancelled.", null)
+                }
     }
 
     private fun handleCompareFaces(
-        targetBytes: ByteArray?,
-        facesBytes: List<ByteArray>?,
-        result: MethodChannel.Result
+            targetBytes: ByteArray?,
+            facesBytes: List<ByteArray>?,
+            result: MethodChannel.Result
     ) {
         if (targetBytes == null || facesBytes.isNullOrEmpty()) {
             result.error("INVALID_ARGS", "targetFace and at least one face are required.", null)
             return
         }
-
-        val targetBitmap = BitmapFactory.decodeByteArray(targetBytes, 0, targetBytes.size)
-        // Build Bitmap array – mirrors BioID MainActivity.kt (line 134: faceCompare.compareFaces(target, faces.toTypedArray()))
-        val faceBitmaps: Array<Bitmap?> = facesBytes
-            .map { bytes -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
-            .toTypedArray()
-
-        faceCompare.compareFaces(targetBitmap, faceBitmaps)
-            .addOnSuccessListener {
-                // averageConfidence confirmed in BioID MainActivity.kt (line 136)
-                result.success(mapOf("averageConfidence" to it.averageConfidence.toDouble()))
-            }
-            .addOnFailureListener { ex ->
-                result.error("FACE_COMPARE_FAILED", ex.message, null)
-            }
+        val target = BitmapFactory.decodeByteArray(targetBytes, 0, targetBytes.size)
+        val faces =
+                facesBytes
+                        .map { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                        .toTypedArray<Bitmap?>()
+        faceCompare
+                .compareFaces(target, faces)
+                .addOnSuccessListener {
+                    result.success(mapOf("averageConfidence" to it.averageConfidence.toDouble()))
+                }
+                .addOnFailureListener { ex ->
+                    result.error("FACE_COMPARE_FAILED", ex.message, null)
+                }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
-    private fun bitmapToBytes(bitmap: Bitmap): ByteArray {
-        val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-        return stream.toByteArray()
-    }
+    private fun bitmapToBytes(bitmap: Bitmap): ByteArray =
+            ByteArrayOutputStream()
+                    .also { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                    .toByteArray()
+
+    private fun Date.fmt(): String = DATE_FMT.format(this)
 }

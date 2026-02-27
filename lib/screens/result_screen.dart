@@ -60,8 +60,14 @@ class ResultScreen extends StatelessWidget {
               const SizedBox(height: 24),
             ],
 
-            // ── Confidence gauge (liveness / face compare) ──────────
-            if (result.hasConfidence) ...[
+            // ── Liveness verdict (pass / fail) ────────────────────
+            if (result.isAlive != null) ...[
+              _LivenessVerdict(isAlive: result.isAlive!),
+              const SizedBox(height: 24),
+            ],
+
+            // ── Confidence gauge (face compare only) ────────────────
+            if (result.type == ScanResultType.faceCompare && result.hasConfidence) ...[
               _ConfidenceCard(
                   confidence: result.confidence!,
                   type: result.type),
@@ -154,6 +160,50 @@ class _SuccessBanner extends StatelessWidget {
                     fontSize: 12,
                   ),
                 ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LivenessVerdict extends StatelessWidget {
+  final bool isAlive;
+  const _LivenessVerdict({required this.isAlive});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isAlive ? AppTheme.success : AppTheme.error;
+    final icon = isAlive ? Icons.check_circle : Icons.cancel;
+    final label = isAlive ? 'Live Person' : 'Not Live';
+    final desc = isAlive
+        ? 'The SDK confirmed this is a real, live person.'
+        : 'The SDK determined this is not a live person.';
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withAlpha(80)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 40),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w800, color: color,
+                )),
+                const SizedBox(height: 4),
+                Text(desc, style: const TextStyle(
+                  fontSize: 12, color: AppTheme.onBackgroundMuted, height: 1.4,
+                )),
               ],
             ),
           ),
@@ -271,9 +321,7 @@ class _ConfidenceCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            type == ScanResultType.liveness
-                ? 'The SDK is $pct% confident this is a live person.'
-                : 'Average facial similarity score between the two images.',
+            'Average facial similarity score between the two images.',
             style: const TextStyle(
               fontSize: 12,
               color: AppTheme.onBackgroundMuted,

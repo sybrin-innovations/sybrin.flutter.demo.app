@@ -1,27 +1,15 @@
 /// SDK configuration for the BioID Flutter demo.
 ///
-/// This file is the **single source of truth** for:
-/// - Sybrin SDK license keys
-/// - Feature flags (enable/disable individual SDK capabilities)
-///
-/// To configure the demo for a different environment:
-/// 1. Replace the license key constants below with your keys.
-/// 2. Toggle [SdkFeatureFlags] defaults to show/hide features on the home screen.
+/// Single source of truth for Sybrin SDK license keys and feature flags.
 library;
 
 // ---------------------------------------------------------------------------
 // License Keys
 // ---------------------------------------------------------------------------
 
-/// Container for all Sybrin SDK license keys used in this demo.
-///
-/// These keys are the same ones used in the companion Android app's
-/// `SDKLicense.kt`. Replace them here to target a different Sybrin environment.
 class SdkLicenseKeys {
-  SdkLicenseKeys._(); // prevent instantiation
+  SdkLicenseKeys._();
 
-  /// License key for the **Sybrin Identity SDK** (document scanning).
-  /// Used to initialise [SybrinIdentity] on the Android side.
   static const String identityKey =
       'bRdpOKxSHF9GHxn5agAfIAqRW7oOhziGf3XNxTKPbdZiEVGn/X/tteysFuywxzuNt8Mq71Mk'
       'ainJz6hAroh+Fk4441tVybMTOpWD02ZjVYFotZ1JTiVPEN66ngR16w4HdQLGL+FwYXTgLcUz'
@@ -39,8 +27,6 @@ class SdkLicenseKeys {
       'NsS/pAaa1WJlbJLOdERS+J/7fLHfgYtHq2Lcj/ZrGiZdrbLq0fAUogwyzMLztW+kr2Bd3P/'
       'hI2YiEUIWB2A72W1zRYZRQKERRFzzjfSLvZPgoaamIkzG1OqA==';
 
-  /// License key for the **Sybrin Biometrics SDK** (liveness + face comparison).
-  /// Used to initialise both [SybrinLivenessDetection] and [SybrinFacialComparison].
   static const String biometricsKey =
       'bRdpOKxSHF9GHxn5agAfIAqRW7oOhziGf3XNxTKPbdZiEVGn/X/tteysFuywxzuN5Gv+fUQl'
       '9fGPumV3BX6I6FTGxBkzKBHDTvHkLoqb3lIb7sHD59PZF4O41TA81rRY9LeHVhx6+g2Z5dS'
@@ -64,77 +50,37 @@ class SdkLicenseKeys {
 // Feature Flags
 // ---------------------------------------------------------------------------
 
-/// Controls which SDK features are exposed in the demo app UI.
+/// Controls which SDK features are shown on the home screen.
 ///
-/// These defaults determine what is **enabled on first launch**.
-/// Users can change them at runtime via the Settings screen
-/// (persisted with [SharedPreferences]).
+/// Identity scanning is always enabled (the scanner itself has a
+/// country/document picker). Only biometrics features have toggles.
 class SdkFeatureFlags {
-  /// Whether the Green Book (South African old ID book) scanning feature is enabled.
-  final bool enableGreenBook;
-
-  /// Whether the South African Passport scanning feature is enabled.
-  final bool enablePassport;
-
-  /// Whether the South African ID Card scanning feature is enabled.
-  final bool enableIdCard;
-
-  /// Whether the Passive Liveness Detection feature is enabled.
   final bool enableLiveness;
-
-  /// Whether the Facial Comparison feature is enabled.
-  /// Note: This requires at least one liveness/identity scan to have
-  /// produced a portrait image first.
   final bool enableFaceCompare;
 
   const SdkFeatureFlags({
-    // Identity features off by default – enable in Settings to test
-    this.enableGreenBook = false,
-    this.enablePassport = false,
-    this.enableIdCard = false,
-    // Biometrics on by default
     this.enableLiveness = true,
     this.enableFaceCompare = true,
   });
 
-  /// Creates a copy of this config with the specified fields replaced.
   SdkFeatureFlags copyWith({
-    bool? enableGreenBook,
-    bool? enablePassport,
-    bool? enableIdCard,
     bool? enableLiveness,
     bool? enableFaceCompare,
-  }) {
-    return SdkFeatureFlags(
-      enableGreenBook: enableGreenBook ?? this.enableGreenBook,
-      enablePassport: enablePassport ?? this.enablePassport,
-      enableIdCard: enableIdCard ?? this.enableIdCard,
-      enableLiveness: enableLiveness ?? this.enableLiveness,
-      enableFaceCompare: enableFaceCompare ?? this.enableFaceCompare,
-    );
-  }
+  }) =>
+      SdkFeatureFlags(
+        enableLiveness: enableLiveness ?? this.enableLiveness,
+        enableFaceCompare: enableFaceCompare ?? this.enableFaceCompare,
+      );
 
-  /// Converts feature flags to/from [SharedPreferences] keys.
-  static const String _kGreenBook = 'feature_greenbook';
-  static const String _kPassport = 'feature_passport';
-  static const String _kIdCard = 'feature_idcard';
   static const String _kLiveness = 'feature_liveness';
   static const String _kFaceCompare = 'feature_facecompare';
 
-  /// Serialises to a [Map] for persisting in [SharedPreferences].
   Map<String, bool> toMap() => {
-        _kGreenBook: enableGreenBook,
-        _kPassport: enablePassport,
-        _kIdCard: enableIdCard,
         _kLiveness: enableLiveness,
         _kFaceCompare: enableFaceCompare,
       };
 
-  /// Deserialises from a [Map] loaded from [SharedPreferences].
   factory SdkFeatureFlags.fromMap(Map<String, bool> map) => SdkFeatureFlags(
-        enableGreenBook: map[_kGreenBook] ?? false,
-        enablePassport: map[_kPassport] ?? false,
-        enableIdCard: map[_kIdCard] ?? false,
         enableLiveness: map[_kLiveness] ?? true,
         enableFaceCompare: map[_kFaceCompare] ?? true,
       );

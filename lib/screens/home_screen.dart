@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import 'identity_screen.dart';
 import 'liveness_screen.dart';
 import 'face_compare_screen.dart';
+import 'guided_demo_screen.dart';
 import 'settings_screen.dart';
 
 /// Home screen – main landing page of the BioID demo.
@@ -110,52 +111,24 @@ class HomeScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // Identity Scanning
+                // ── Full KYC Demo (guided flow) ────────────────────
+                _GuidedDemoCard(),
+                const SizedBox(height: 28),
+
+                // Identity Scanning — single card opens country/document picker
                 const _GroupHeader(label: 'Identity Scanning'),
                 const SizedBox(height: 10),
                 _FeatureCard(
-                  icon: Icons.book_outlined,
-                  title: 'Green Book',
+                  icon: Icons.document_scanner_outlined,
+                  title: 'Identity Document',
                   description:
-                      'Scans the South African old green ID book using OCR.',
-                  enabled: flags.enableGreenBook,
-                  // CI: Identity Verification → Cyan
+                      'Scan passports, ID cards, and other documents from multiple countries.',
+                  enabled: true,
                   accentColor: AppTheme.identityCyan,
                   delay: 0,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                        builder: (_) => const IdentityScreen(initialTab: 0)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _FeatureCard(
-                  icon: Icons.travel_explore_outlined,
-                  title: 'Passport',
-                  description:
-                      'Reads MRZ + biographic data from a South African passport.',
-                  enabled: flags.enablePassport,
-                  accentColor: AppTheme.identityCyan,
-                  delay: 50,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const IdentityScreen(initialTab: 1)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _FeatureCard(
-                  icon: Icons.credit_card_outlined,
-                  title: 'ID Card',
-                  description:
-                      'Captures and extracts data from a South African Smart ID Card.',
-                  enabled: flags.enableIdCard,
-                  accentColor: AppTheme.identityCyan,
-                  delay: 100,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const IdentityScreen(initialTab: 2)),
+                    MaterialPageRoute(builder: (_) => const IdentityScreen()),
                   ),
                 ),
                 const SizedBox(height: 28),
@@ -169,9 +142,8 @@ class HomeScreen extends StatelessWidget {
                   description:
                       'Passive liveness check – no gestures required. Detects a live person in front of the camera.',
                   enabled: flags.enableLiveness,
-                  // CI: primary blue for biometrics
                   accentColor: AppTheme.primary,
-                  delay: 150,
+                  delay: 50,
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const LivenessScreen()),
@@ -185,7 +157,7 @@ class HomeScreen extends StatelessWidget {
                       'Compares a portrait from a document against selfies captured via Liveness Detection.',
                   enabled: flags.enableFaceCompare,
                   accentColor: AppTheme.primary,
-                  delay: 200,
+                  delay: 100,
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -229,6 +201,80 @@ class _GroupHeader extends StatelessWidget {
         const SizedBox(width: 12),
         const Expanded(child: Divider(height: 1, color: AppTheme.outline)),
       ],
+    );
+  }
+}
+
+/// Prominent entry point into the end-to-end guided KYC flow.
+class _GuidedDemoCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Animate(
+      effects: [
+        FadeEffect(duration: 350.ms),
+        SlideEffect(
+            begin: const Offset(0, 0.1),
+            end: Offset.zero,
+            duration: 350.ms),
+      ],
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const GuidedDemoScreen()),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withAlpha(22),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Icon(Icons.route_outlined,
+                      color: AppTheme.primary, size: 22),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Full KYC Demo',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.onBackground,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Guided end-to-end flow: Document scan, liveness check, and face comparison.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.onBackgroundMuted,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.play_circle_outline_rounded,
+                    color: AppTheme.primary, size: 20),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -21,45 +21,10 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          // ── Identity section ────────────────────────────────────
-          const _SectionLabel(label: 'Identity Scanning'),
-          _FeatureToggle(
-            icon: Icons.book_outlined,
-            // CI: Identity Verification → Cyan
-            iconColor: AppTheme.identityCyan,
-            title: 'Green Book',
-            description:
-                'Enable scanning of the South African old green ID book.',
-            value: flags.enableGreenBook,
-            onChanged: settings.setGreenBook,
-          ),
-          _FeatureToggle(
-            icon: Icons.travel_explore_outlined,
-            iconColor: AppTheme.identityCyan,
-            title: 'Passport',
-            description: 'Enable South African passport MRZ reading.',
-            value: flags.enablePassport,
-            onChanged: settings.setPassport,
-          ),
-          _FeatureToggle(
-            icon: Icons.credit_card_outlined,
-            iconColor: AppTheme.identityCyan,
-            title: 'ID Card',
-            description: 'Enable South African Smart ID Card scanning.',
-            value: flags.enableIdCard,
-            onChanged: settings.setIdCard,
-          ),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Divider(height: 32),
-          ),
-
           // ── Biometrics section ──────────────────────────────────
           const _SectionLabel(label: 'Biometrics'),
           _FeatureToggle(
             icon: Icons.face_retouching_natural,
-            // CI: Biometrics → primary Blue
             iconColor: AppTheme.primary,
             title: 'Liveness Detection',
             description:

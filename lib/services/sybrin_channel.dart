@@ -32,52 +32,21 @@ class SybrinChannel {
       MethodChannel('com.demo.bioid/sybrin');
 
   // ------------------------------------------------------------------
-  // Identity SDK – Document Scanning
+  // Identity SDK – Universal document scanner
   // ------------------------------------------------------------------
 
-  /// Scans a **South African Green Book** (old ID book).
+  /// Scans any document supported by the Sybrin Identity SDK.
   ///
-  /// Returns a [ScanResult] with [ScanResultType.greenBook].
-  /// The [ScanResult.fields] map contains OCR-extracted fields such as
-  /// "Surname", "Name", "Date of Birth", "ID Number".
+  /// [docEnum] must be the exact Java enum name from `Document.java`
+  /// (e.g. `"SouthAfricaIDCard"`, `"KenyaPassport"`).
   ///
-  /// Throws [SybrinException] if the SDK returns an error or the user
-  /// cancels the scan.
-  Future<ScanResult> scanGreenBook() async {
+  /// Returns a [ScanResult] whose [ScanResult.fields] map contains all
+  /// OCR-extracted data and whose [ScanResult.portraitBytes] holds the
+  /// portrait image when available.
+  Future<ScanResult> scanDocument(String docEnum) async {
     try {
-      final result = await _channel.invokeMethod<Map>('scanGreenBook');
-      return _parseIdentityResult(ScanResultType.greenBook, result);
-    } on PlatformException catch (e) {
-      throw SybrinException._fromPlatform(e);
-    }
-  }
-
-  /// Scans a **South African Passport**.
-  ///
-  /// Returns a [ScanResult] with [ScanResultType.passport].
-  /// The [ScanResult.portraitBytes] field contains the portrait photo
-  /// extracted from the passport biographic page.
-  ///
-  /// Throws [SybrinException] on failure or cancellation.
-  Future<ScanResult> scanPassport() async {
-    try {
-      final result = await _channel.invokeMethod<Map>('scanPassport');
-      return _parseIdentityResult(ScanResultType.passport, result);
-    } on PlatformException catch (e) {
-      throw SybrinException._fromPlatform(e);
-    }
-  }
-
-  /// Scans a **South African Smart ID Card**.
-  ///
-  /// Returns a [ScanResult] with [ScanResultType.idCard].
-  /// Both the front and back chip-page data are extracted by the SDK.
-  ///
-  /// Throws [SybrinException] on failure or cancellation.
-  Future<ScanResult> scanIdCard() async {
-    try {
-      final result = await _channel.invokeMethod<Map>('scanIdCard');
-      return _parseIdentityResult(ScanResultType.idCard, result);
+      final raw = await _channel.invokeMethod<Map>('scanDocument', {'document': docEnum});
+      return _parseIdentityResult(raw);
     } on PlatformException catch (e) {
       throw SybrinException._fromPlatform(e);
     }
@@ -102,9 +71,11 @@ class SybrinChannel {
           (result?['confidence'] as num?)?.toDouble() ?? 0.0;
       final portraitBytes =
           result?['portraitBytes'] as Uint8List?;
+      final isAlive = result?['isAlive'] as bool? ?? false;
 
       return ScanResult(
         type: ScanResultType.liveness,
+        isAlive: isAlive,
         confidence: confidence,
         portraitBytes: portraitBytes,
       );
@@ -155,22 +126,23 @@ class SybrinChannel {
   // Helpers
   // ------------------------------------------------------------------
 
-  /// Converts the raw [Map] returned by the platform channel into a
-  /// typed [ScanResult] for identity scan operations.
-  ScanResult _parseIdentityResult(ScanResultType type, Map? raw) {
+  /// Converts the raw [Map] from Android into a [ScanResult] for identity scans.
+  ScanResult _parseIdentityResult(Map? raw) {
+    const reserved = {
+      'portraitBytes', 'documentImageBytes', 'croppedDocumentBytes',
+      'documentType', 'country', 'docCategory',
+    };
     final fields = <String, String>{};
-
-    // Every key that is not 'portraitBytes' is treated as an OCR field.
     raw?.forEach((key, value) {
-      if (key != 'portraitBytes' && value != null) {
+      if (!reserved.contains(key) && value != null) {
         fields[key.toString()] = value.toString();
       }
     });
 
     final portraitBytes = raw?['portraitBytes'] as Uint8List?;
-
     return ScanResult(
-      type: type,
+      type: ScanResultType.identity,
+      documentEnum: raw?['documentType']?.toString(),
       fields: fields,
       portraitBytes: portraitBytes,
     );

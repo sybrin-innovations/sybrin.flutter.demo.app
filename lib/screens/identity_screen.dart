@@ -1,55 +1,87 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
-import '../providers/app_settings_provider.dart';
+import '../config/identity_catalog.dart';
 import '../providers/scan_result_provider.dart';
 import '../services/sybrin_channel.dart';
 import '../theme/app_theme.dart';
 import '../widgets/loading_overlay.dart';
-import '../widgets/section_header.dart';
 import 'result_screen.dart';
 
-/// Screen for all three identity document scanning operations.
+/// Dynamic identity document scanner.
 ///
-/// Presents buttons for:
-/// - Green Book (SA old ID book)
-/// - Passport
-/// - Smart ID Card
-///
-/// Each button is shown or hidden based on [AppSettingsProvider] feature flags
-/// and the [initialTab] determines which document type is pre-highlighted
-/// when navigating here from the home screen card.
+/// Step 1: pick a country (with flag emoji).
+/// Step 2: pick a document from that country's supported list.
+/// Step 3: scan.
 class IdentityScreen extends StatefulWidget {
-  /// Which tab to visually highlight on first show:
-  /// - 0 → Green Book
-  /// - 1 → Passport
-  /// - 2 → ID Card
-  final int initialTab;
+  /// Pass a pre-selected document enum to skip straight to the scan button.
+  final String? preselectedDocEnum;
 
-  const IdentityScreen({super.key, this.initialTab = 0});
+  const IdentityScreen({super.key, this.preselectedDocEnum, int initialTab = 0});
 
   @override
   State<IdentityScreen> createState() => _IdentityScreenState();
 }
 
 class _IdentityScreenState extends State<IdentityScreen> {
-  late int _selectedTab;
+  late CountryEntry _country;
+  late DocEntry _doc;
 
   @override
   void initState() {
     super.initState();
-    _selectedTab = widget.initialTab;
+    // Default: South Africa → ID Card
+    _country = kIdentityCatalog.first;
+
+    if (widget.preselectedDocEnum != null) {
+      // Find the country + doc matching the preselected enum
+      for (final c in kIdentityCatalog) {
+        final match = c.documents.where((d) => d.docEnum == widget.preselectedDocEnum).firstOrNull;
+        if (match != null) {
+          _country = c;
+          _doc = match;
+          return;
+        }
+      }
+    }
+    _doc = _country.documents.first;
+  }
+
+  void _onCountryChanged(CountryEntry c) {
+    setState(() {
+      _country = c;
+      _doc = c.documents.first;
+    });
+  }
+
+  Future<void> _scan(BuildContext context) async {
+    final scanProvider = context.read<ScanResultProvider>();
+    scanProvider.beginScan();
+    try {
+      final result = await SybrinChannel.instance.scanDocument(_doc.docEnum);
+      scanProvider.onSuccess(result);
+      if (context.mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const ResultScreen()));
+      }
+    } on SybrinException catch (e) {
+      scanProvider.onError();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppTheme.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final flags = context.watch<AppSettingsProvider>().flags;
-    final scanProvider = context.watch<ScanResultProvider>();
+    final isLoading = context.watch<ScanResultProvider>().isLoading;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Identity Scanning'),
-        leading: const BackButton(),
-      ),
+      appBar: AppBar(title: const Text('Identity Scanning')),
       body: Stack(
         children: [
           SingleChildScrollView(
@@ -57,295 +89,181 @@ class _IdentityScreenState extends State<IdentityScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SectionHeader(
-                  icon: Icons.document_scanner_outlined,
-                  title: 'Document Scanning',
-                  subtitle:
-                      'Select a document type below. The Sybrin Identity SDK '
-                      'will launch the camera, detect the document, and extract '
-                      'all readable fields automatically.',
+                // ── Country picker ──────────────────────────────────
+                _Label('Country'),
+                const SizedBox(height: 8),
+                _CountryPicker(
+                  selected: _country,
+                  onChanged: _onCountryChanged,
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 20),
 
-                // ── Document type selector chips ────────────────────
-                Row(
-                  children: [
-                    if (flags.enableGreenBook)
-                      _TypeChip(
-                        label: 'Green Book',
-                        icon: Icons.book_outlined,
-                        selected: _selectedTab == 0,
-                        onTap: () => setState(() => _selectedTab = 0),
-                      ),
-                    if (flags.enablePassport) ...[
-                      const SizedBox(width: 10),
-                      _TypeChip(
-                        label: 'Passport',
-                        icon: Icons.travel_explore_outlined,
-                        selected: _selectedTab == 1,
-                        onTap: () => setState(() => _selectedTab = 1),
-                      ),
-                    ],
-                    if (flags.enableIdCard) ...[
-                      const SizedBox(width: 10),
-                      _TypeChip(
-                        label: 'ID Card',
-                        icon: Icons.credit_card_outlined,
-                        selected: _selectedTab == 2,
-                        onTap: () => setState(() => _selectedTab = 2),
-                      ),
-                    ],
-                  ],
+                // ── Document picker ─────────────────────────────────
+                _Label('Document Type'),
+                const SizedBox(height: 8),
+                _DocPicker(
+                  country: _country,
+                  selected: _doc,
+                  onChanged: (d) => setState(() => _doc = d),
                 ),
-                const SizedBox(height: 28),
-
-                // ── Description card ────────────────────────────────
-                _DocumentDescription(tab: _selectedTab),
                 const SizedBox(height: 28),
 
                 // ── Scan button ─────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: scanProvider.isLoading
-                        ? null
-                        : () => _startScan(context),
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: const Text('Start Scanning'),
+                    onPressed: isLoading ? null : () => _scan(context),
+                    icon: const Icon(Icons.document_scanner_outlined),
+                    label: Text('Scan ${_doc.label}'),
                   ),
                 ),
-                const SizedBox(height: 12),
-
-                // ── If no relevant features are enabled ─────────────
-                if (!flags.enableGreenBook &&
-                    !flags.enablePassport &&
-                    !flags.enableIdCard)
-                  _DisabledNotice(
-                    message:
-                        'All identity scanning features are disabled. '
-                        'Enable them in Settings.',
-                  ),
-              ],
+              ].animate(interval: 60.ms).fadeIn(duration: 280.ms).slideY(begin: 0.06, end: 0),
             ),
           ),
-
-          // Loading overlay while SDK is active
-          if (scanProvider.isLoading)
-            const LoadingOverlay(message: 'Scanning document…'),
+          if (isLoading) const LoadingOverlay(message: 'Scanning document…'),
         ],
-      ),
-    );
-  }
-
-  /// Determines which SDK call to make based on the selected tab and
-  /// dispatches via [SybrinChannel]. Navigates to [ResultScreen] on success,
-  /// or shows a [SnackBar] on failure/cancellation.
-  Future<void> _startScan(BuildContext context) async {
-    final scanProvider = context.read<ScanResultProvider>();
-    final channel = SybrinChannel.instance;
-
-    // Signal to the provider that a scan is starting (clears old result).
-    scanProvider.beginScan();
-
-    try {
-      final result = switch (_selectedTab) {
-        0 => await channel.scanGreenBook(),
-        1 => await channel.scanPassport(),
-        _ => await channel.scanIdCard(),
-      };
-
-      scanProvider.onSuccess(result);
-
-      if (context.mounted) {
-        // Navigate to the result screen once the state is updated.
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const ResultScreen()),
-        );
-      }
-    } on SybrinException catch (e) {
-      scanProvider.onError();
-      if (context.mounted) {
-        _showError(context, e.message);
-      }
-    }
-  }
-
-  void _showError(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppTheme.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Private sub-widgets
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// Widgets
+// ─────────────────────────────────────────────────────────────────────────────
 
-class _TypeChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
+class _Label extends StatelessWidget {
+  final String text;
+  const _Label(this.text);
+  @override
+  Widget build(BuildContext context) => Text(
+    text.toUpperCase(),
+    style: const TextStyle(
+      fontSize: 11, fontWeight: FontWeight.w700,
+      letterSpacing: 1.5, color: AppTheme.onBackgroundMuted,
+    ),
+  );
+}
 
-  const _TypeChip({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
+/// Tappable card that opens a bottom-sheet country list.
+class _CountryPicker extends StatelessWidget {
+  final CountryEntry selected;
+  final ValueChanged<CountryEntry> onChanged;
+  const _CountryPicker({required this.selected, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => _show(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
-          color: selected
-              ? AppTheme.identityCyan.withAlpha(25)
-              : AppTheme.surfaceVariant,
+          color: AppTheme.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? AppTheme.identityCyan : AppTheme.outline,
-            width: selected ? 1.5 : 1,
-          ),
+          border: Border.all(color: AppTheme.identityCyan.withAlpha(80)),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                size: 16,
-                color: selected ? AppTheme.identityCyan : AppTheme.onBackgroundMuted),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: selected ? AppTheme.identityCyan : AppTheme.onBackgroundMuted,
-              ),
+            Text(selected.flag, style: const TextStyle(fontSize: 24)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(selected.name,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.onBackground)),
             ),
+            const Icon(Icons.keyboard_arrow_down, color: AppTheme.onBackgroundMuted, size: 20),
           ],
         ),
       ),
     );
   }
-}
 
-class _DocumentDescription extends StatelessWidget {
-  final int tab;
-  const _DocumentDescription({required this.tab});
-
-  // All identity document types use CI Identity Verification Cyan (#32C8FA)
-  static const _data = [
-    (
-      title: 'South African Green Book',
-      description:
-          'The original South African identity document (before 2013). '
-          'The SDK uses OCR to extract the name, surname, ID number, date '
-          'of birth, sex, and citizenship status from both pages.',
-      icon: Icons.book_outlined,
-      color: AppTheme.identityCyan,
-    ),
-    (
-      title: 'South African Passport',
-      description:
-          'Reads the Machine Readable Zone (MRZ) on the biographic data page '
-          'and extracts the portrait photograph. Works with both new and '
-          'older SA passport booklets.',
-      icon: Icons.travel_explore_outlined,
-      color: AppTheme.identityCyan,
-    ),
-    (
-      title: 'Smart ID Card',
-      description:
-          'The modern South African green-chip card. The SDK captures both '
-          'the front and back faces, reading the chip data and extracting '
-          'the biometric portrait embedded in the card.',
-      icon: Icons.credit_card_outlined,
-      color: AppTheme.identityCyan,
-    ),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final d = _data[tab.clamp(0, 2)];
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: d.color.withAlpha(15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: d.color.withAlpha(60)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(d.icon, color: d.color, size: 22),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  d.title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.onBackground,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  d.description,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.onBackgroundMuted,
-                    height: 1.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+  void _show(BuildContext context) {
+    showModalBottomSheet<CountryEntry>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => _CountrySheet(selected: selected, onSelected: (c) { Navigator.pop(context); onChanged(c); }),
     );
   }
 }
 
-class _DisabledNotice extends StatelessWidget {
-  final String message;
-  const _DisabledNotice({required this.message});
+class _CountrySheet extends StatelessWidget {
+  final CountryEntry selected;
+  final ValueChanged<CountryEntry> onSelected;
+  const _CountrySheet({required this.selected, required this.onSelected});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.warning.withAlpha(20),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.warning.withAlpha(80)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: AppTheme.warning, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(message,
-                style: const TextStyle(
-                    color: AppTheme.warning,
-                    fontSize: 13,
-                    height: 1.4)),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 8),
+        Container(width: 36, height: 4, decoration: BoxDecoration(color: AppTheme.outline, borderRadius: BorderRadius.circular(2))),
+        const SizedBox(height: 12),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Select Country', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.onBackgroundMuted)),
           ),
-        ],
-      ),
+        ),
+        Flexible(
+          child: ListView(
+            shrinkWrap: true,
+            children: kIdentityCatalog.map((c) {
+              final isSelected = c.name == selected.name;
+              return ListTile(
+                leading: Text(c.flag, style: const TextStyle(fontSize: 22)),
+                title: Text(c.name, style: TextStyle(fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400, color: isSelected ? AppTheme.identityCyan : AppTheme.onBackground)),
+                trailing: isSelected ? const Icon(Icons.check, color: AppTheme.identityCyan, size: 18) : null,
+                onTap: () => onSelected(c),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+/// Grid of document type chips.
+class _DocPicker extends StatelessWidget {
+  final CountryEntry country;
+  final DocEntry selected;
+  final ValueChanged<DocEntry> onChanged;
+  const _DocPicker({required this.country, required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10, runSpacing: 10,
+      children: country.documents.map((doc) {
+        final isSelected = doc.docEnum == selected.docEnum;
+        return GestureDetector(
+          onTap: () => onChanged(doc),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: isSelected ? AppTheme.identityCyan.withAlpha(25) : AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isSelected ? AppTheme.identityCyan : AppTheme.outline,
+                width: isSelected ? 1.5 : 1,
+              ),
+            ),
+            child: Text(
+              doc.label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isSelected ? AppTheme.identityCyan : AppTheme.onBackgroundMuted,
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
