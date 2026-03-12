@@ -1,7 +1,12 @@
 package com.demo.bioid_flutter
 
+import android.app.Activity
+import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import com.sybrin.facecomparison.SybrinFacialComparison
 import com.sybrin.facecomparison.SybrinFacialComparisonConfiguration
 import com.sybrin.identity.SybrinIdentity
@@ -23,12 +28,57 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val CHANNEL = "com.demo.bioid/sybrin"
+        private const val LIVENESS_ACTIVITY_CLASS_NAME =
+                "com.sybrin.livenessdetection.app.PassiveLivenessScanningActivity"
+        private const val LIVENESS_CANCELLED_MESSAGE = "Liveness detection was cancelled."
         private val DATE_FMT = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     }
 
     private lateinit var sybrinIdentity: SybrinIdentity
     private lateinit var livenessDetection: SybrinLivenessDetection
     private lateinit var faceCompare: SybrinFacialComparison
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingLivenessResult: MethodChannel.Result? = null
+    private val cancelPendingLivenessRunnable = Runnable {
+        completeLivenessResult { error("SCAN_CANCELLED", LIVENESS_CANCELLED_MESSAGE, null) }
+    }
+    private val sdkActivityLifecycleCallbacks =
+            object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+
+                override fun onActivityStarted(activity: Activity) = Unit
+
+                override fun onActivityResumed(activity: Activity) = Unit
+
+                override fun onActivityPaused(activity: Activity) = Unit
+
+                override fun onActivityStopped(activity: Activity) = Unit
+
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) =
+                        Unit
+
+                override fun onActivityDestroyed(activity: Activity) {
+                    if (
+                            activity.javaClass.name == LIVENESS_ACTIVITY_CLASS_NAME &&
+                                    pendingLivenessResult != null
+                    ) {
+                        // The SDK sometimes finishes its activity without surfacing a cancellation
+                        // callback. Resolve the pending method call so Flutter can recover.
+                        mainHandler.postDelayed(cancelPendingLivenessRunnable, 200)
+                    }
+                }
+            }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        application.registerActivityLifecycleCallbacks(sdkActivityLifecycleCallbacks)
+    }
+
+    override fun onDestroy() {
+        application.unregisterActivityLifecycleCallbacks(sdkActivityLifecycleCallbacks)
+        mainHandler.removeCallbacks(cancelPendingLivenessRunnable)
+        super.onDestroy()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -148,6 +198,14 @@ class MainActivity : FlutterActivity() {
     // ── Biometrics ──────────────────────────────────────────────────────────────
 
     private fun handleLiveness(result: MethodChannel.Result) {
+        if (pendingLivenessResult != null) {
+            result.error("LIVENESS_IN_PROGRESS", "Liveness detection is already running.", null)
+            return
+        }
+
+        pendingLivenessResult = result
+        mainHandler.removeCallbacks(cancelPendingLivenessRunnable)
+
         livenessDetection
                 .openPassiveLivenessDetection()
                 .addOnSuccessListener {
@@ -156,12 +214,23 @@ class MainActivity : FlutterActivity() {
                     data["confidence"] = it.livenessConfidence.toDouble()
                     data["isAlive"] = it.isAlive
                     data["hasFaceMask"] = it.hasFaceMask()
-                    result.success(data)
+                    completeLivenessResult { success(data) }
                 }
-                .addOnFailureListener { ex -> result.error("LIVENESS_FAILED", ex.message, null) }
+                .addOnFailureListener { ex ->
+                    completeLivenessResult { error("LIVENESS_FAILED", ex.message, null) }
+                }
                 .addOnCancelListener {
-                    result.error("SCAN_CANCELLED", "Liveness detection was cancelled.", null)
+                    completeLivenessResult {
+                        error("SCAN_CANCELLED", LIVENESS_CANCELLED_MESSAGE, null)
+                    }
                 }
+    }
+
+    private fun completeLivenessResult(block: MethodChannel.Result.() -> Unit) {
+        val pendingResult = pendingLivenessResult ?: return
+        pendingLivenessResult = null
+        mainHandler.removeCallbacks(cancelPendingLivenessRunnable)
+        pendingResult.block()
     }
 
     private fun handleCompareFaces(
